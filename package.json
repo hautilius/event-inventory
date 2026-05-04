@@ -1,0 +1,19 @@
+{
+  "name": "event-kg-inventory",
+  "version": "1.0.0",
+  "description": "Инвентаризация для event.kg",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4"
+  }
+}

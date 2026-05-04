@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Админ — event.kg</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <a href="/"><strong>event.kg</strong></a>
+        <span>admin</span>
+      </div>
+      <div>
+        <a class="btn btn-sm btn-ghost" href="/warehouse.html">Склад</a>
+        <a class="btn btn-sm btn-ghost" href="/">Главная</a>
+      </div>
+    </header>
+
+    <main class="container">
+      <div id="gate" class="card">
+        <p>Доступ только для администратора. <a href="/">Войти как админ</a></p>
+      </div>
+
+      <div id="app" class="hidden">
+        <div class="grid grid-2">
+          <div class="card">
+            <h2>Новый товар</h2>
+            <label for="f-name">Название *</label>
+            <input id="f-name" placeholder="Например: LED паркан 2м" />
+
+            <div class="flex" style="margin-top: 0.75rem">
+              <div class="flex-grow">
+                <label for="f-sku">Артикул / код</label>
+                <input id="f-sku" />
+              </div>
+              <div class="flex-grow">
+                <label for="f-unit">Ед.</label>
+                <input id="f-unit" value="шт" />
+              </div>
+            </div>
+
+            <div class="flex" style="margin-top: 0.75rem">
+              <div class="flex-grow">
+                <label for="f-qty">Начальный остаток</label>
+                <input id="f-qty" type="number" min="0" value="0" />
+              </div>
+              <div class="flex-grow">
+                <label for="f-cat">Категория</label>
+                <input id="f-cat" placeholder="Свет, сцена…" />
+              </div>
+            </div>
+
+            <label for="f-note" style="margin-top: 0.75rem">Заметка</label>
+            <textarea id="f-note"></textarea>
+
+            <div style="margin-top: 1rem">
+              <button type="button" class="btn btn-primary" id="btn-add">Добавить</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Журнал (последние)</h2>
+            <div class="table-wrap" style="max-height: 320px; overflow-y: auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Время</th>
+                    <th>Товар</th>
+                    <th>Операция</th>
+                    <th>Кол-во</th>
+                  </tr>
+                </thead>
+                <tbody id="mov-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="msg"></div>
+
+        <div class="card">
+          <h2>Товары</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Остаток</th>
+                  <th>QR</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="prod-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const msgEl = document.getElementById("msg");
+
+      function showMsg(text, ok) {
+        msgEl.innerHTML = text
+          ? `<div class="msg ${ok ? "msg-ok" : "msg-error"}">${text}</div>`
+          : "";
+      }
+
+      async function api(path, opt) {
+        const r = await fetch(path, {
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...(opt?.headers || {}) },
+          ...opt,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 401) {
+          window.location.href = "/";
+          throw new Error("Нет доступа");
+        }
+        if (!r.ok) throw new Error(data.error || r.statusText);
+        return data;
+      }
+
+      async function loadProducts() {
+        const list = await api("/api/products");
+        const tbody = document.getElementById("prod-body");
+        tbody.innerHTML = list
+          .map(
+            (p) => `
+          <tr data-id="${p.id}">
+            <td>
+              <strong>${escapeHtml(p.name)}</strong><br/>
+              <small style="color:var(--muted)">${escapeHtml(p.sku || "")} ${escapeHtml(p.category || "")}</small><br/>
+              <small style="color:var(--muted)">id: ${p.id}</small>
+            </td>
+            <td>${p.quantity} ${escapeHtml(p.unit || "шт")}</td>
+            <td>
+              <div class="qr-preview"><img src="/api/products/${p.id}/qr.svg" alt="QR" width="120" height="120" /></div>
+              <a href="/api/products/${p.id}/qr.svg" download="qr-${p.id}.svg">Скачать SVG</a>
+            </td>
+            <td>
+              <button type="button" class="btn btn-sm btn-danger btn-del" data-id="${p.id}">Удалить</button>
+            </td>
+          </tr>`
+          )
+          .join("");
+        tbody.querySelectorAll(".btn-del").forEach((btn) => {
+          btn.onclick = async () => {
+            if (!confirm("Удалить товар безвозвратно?")) return;
+            try {
+              await api("/api/products/" + encodeURIComponent(btn.dataset.id), { method: "DELETE" });
+              showMsg("Товар удалён.", true);
+              await loadProducts();
+              await loadMovements();
+            } catch (e) {
+              showMsg(e.message, false);
+            }
+          };
+        });
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      async function loadMovements() {
+        const list = await api("/api/movements");
+        const tbody = document.getElementById("mov-body");
+        tbody.innerHTML = list
+          .map((m) => {
+            const t = new Date(m.at).toLocaleString("ru-RU");
+            const op = m.type === "receive" ? "Приём" : "Отгрузка";
+            return `<tr><td>${escapeHtml(t)}</td><td>${escapeHtml(m.productName || "")}</td><td>${op}</td><td>${m.amount}</td></tr>`;
+          })
+          .join("");
+      }
+
+      document.getElementById("btn-add").onclick = async () => {
+        showMsg("");
+        const name = document.getElementById("f-name").value.trim();
+        if (!name) {
+          showMsg("Введите название.", false);
+          return;
+        }
+        try {
+          await api("/api/products", {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              sku: document.getElementById("f-sku").value,
+              unit: document.getElementById("f-unit").value,
+              quantity: document.getElementById("f-qty").value,
+              category: document.getElementById("f-cat").value,
+              note: document.getElementById("f-note").value,
+            }),
+          });
+          document.getElementById("f-name").value = "";
+          document.getElementById("f-sku").value = "";
+          document.getElementById("f-qty").value = "0";
+          document.getElementById("f-note").value = "";
+          showMsg("Товар добавлен.", true);
+          await loadProducts();
+        } catch (e) {
+          showMsg(e.message, false);
+        }
+      };
+
+      (async () => {
+        try {
+          const { role } = await api("/api/auth/me");
+          if (role !== "admin") {
+            document.getElementById("gate").classList.remove("hidden");
+            document.getElementById("app").classList.add("hidden");
+            return;
+          }
+          document.getElementById("gate").classList.add("hidden");
+          document.getElementById("app").classList.remove("hidden");
+          await loadProducts();
+          await loadMovements();
+        } catch {
+          document.getElementById("gate").classList.remove("hidden");
+          document.getElementById("app").classList.add("hidden");
+        }
+      })();
+    </script>
+  </body>
+</html>

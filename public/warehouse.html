@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Склад — event.kg</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <a href="/"><strong>event.kg</strong></a>
+        <span>склад</span>
+      </div>
+      <div>
+        <a class="btn btn-sm btn-ghost" href="/">На главную</a>
+        <a class="btn btn-sm btn-ghost hidden" id="link-admin" href="/admin.html">Админ</a>
+      </div>
+    </header>
+
+    <main class="container">
+      <div id="gate" class="card hidden">
+        <p>Нужен вход. <a href="/">Войти</a></p>
+      </div>
+
+      <div id="app">
+        <div class="tabs">
+          <button type="button" class="tab active" data-tab="scan">Сканер QR</button>
+          <button type="button" class="tab" data-tab="manual">По ID</button>
+        </div>
+
+        <div id="tab-scan">
+          <div class="card">
+            <h2>Камера</h2>
+            <p style="color: var(--muted); margin-top: 0; font-size: 0.9rem">
+              Разрешите доступ к камере. Наведите на QR с товара (печать из админки).
+            </p>
+            <div id="qr-reader"></div>
+            <button type="button" class="btn btn-ghost" id="btn-cam">Запустить камеру</button>
+            <button type="button" class="btn btn-ghost hidden" id="btn-stop">Остановить</button>
+          </div>
+        </div>
+
+        <div id="tab-manual" class="hidden">
+          <div class="card">
+            <h2>Ввод ID товара</h2>
+            <label for="manual-id">UUID товара (из админки или с этикетки)</label>
+            <input id="manual-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+            <div style="margin-top: 0.75rem">
+              <button type="button" class="btn btn-primary" id="btn-load">Загрузить</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="msg"></div>
+
+        <div id="product-card" class="card hidden">
+          <h2 id="p-name"></h2>
+          <p id="p-meta" style="color: var(--muted); margin: 0.25rem 0 1rem"></p>
+          <p>
+            На складе: <strong id="p-qty"></strong> <span id="p-unit"></span>
+          </p>
+          <div class="flex">
+            <div class="flex-grow">
+              <label for="amt">Количество</label>
+              <input id="amt" type="number" min="1" value="1" />
+            </div>
+          </div>
+          <div class="flex" style="margin-top: 1rem">
+            <button type="button" class="btn btn-success" id="btn-receive">Приём на склад</button>
+            <button type="button" class="btn btn-danger" id="btn-ship">Отгрузка</button>
+          </div>
+          <div style="margin-top: 1rem">
+            <label for="note">Комментарий (необязательно)</label>
+            <input id="note" placeholder="Например: свадьба N, возврат с монтажа" />
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const msgEl = document.getElementById("msg");
+      let scanner = null;
+      let currentId = null;
+
+      function showMsg(text, ok) {
+        msgEl.innerHTML = text
+          ? `<div class="msg ${ok ? "msg-ok" : "msg-error"}">${text}</div>`
+          : "";
+      }
+
+      async function api(path, opt) {
+        const r = await fetch(path, {
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...(opt?.headers || {}) },
+          ...opt,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 401) {
+          window.location.href = "/";
+          throw new Error("Сессия истекла");
+        }
+        if (!r.ok) throw new Error(data.error || r.statusText);
+        return data;
+      }
+
+      function parseQr(text) {
+        const t = String(text).trim();
+        try {
+          const o = JSON.parse(t);
+          if (o && o.id) return o.id;
+        } catch (_) {}
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(t))
+          return t;
+        return null;
+      }
+
+      async function loadProduct(id) {
+        if (!id) {
+          showMsg("Не удалось прочитать QR. Ожидается JSON с полем id или UUID.", false);
+          return;
+        }
+        currentId = id;
+        showMsg("");
+        try {
+          const p = await api("/api/products/" + encodeURIComponent(id));
+          document.getElementById("product-card").classList.remove("hidden");
+          document.getElementById("p-name").textContent = p.name;
+          document.getElementById("p-meta").textContent = [p.sku, p.category].filter(Boolean).join(" · ");
+          document.getElementById("p-qty").textContent = p.quantity;
+          document.getElementById("p-unit").textContent = p.unit || "шт";
+        } catch (e) {
+          document.getElementById("product-card").classList.add("hidden");
+          showMsg(e.message, false);
+        }
+      }
+
+      document.querySelectorAll(".tab").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          const t = btn.dataset.tab;
+          document.getElementById("tab-scan").classList.toggle("hidden", t !== "scan");
+          document.getElementById("tab-manual").classList.toggle("hidden", t !== "manual");
+        });
+      });
+
+      document.getElementById("btn-load").onclick = () =>
+        loadProduct(document.getElementById("manual-id").value.trim());
+
+      async function stock(kind) {
+        if (!currentId) return;
+        const amount = Math.max(1, parseInt(document.getElementById("amt").value, 10) || 1);
+        const note = document.getElementById("note").value.trim();
+        showMsg("");
+        try {
+          const path = kind === "receive" ? "/api/stock/receive" : "/api/stock/ship";
+          const { product } = await api(path, {
+            method: "POST",
+            body: JSON.stringify({ productId: currentId, amount, note }),
+          });
+          document.getElementById("p-qty").textContent = product.quantity;
+          showMsg(kind === "receive" ? "Приём выполнен." : "Отгрузка выполнена.", true);
+        } catch (e) {
+          showMsg(e.message, false);
+        }
+      }
+      document.getElementById("btn-receive").onclick = () => stock("receive");
+      document.getElementById("btn-ship").onclick = () => stock("ship");
+
+      document.getElementById("btn-cam").onclick = async () => {
+        if (!window.Html5Qrcode) {
+          showMsg("Библиотека сканера не загрузилась. Проверьте сеть.", false);
+          return;
+        }
+        const region = "qr-reader";
+        scanner = new Html5Qrcode(region);
+        document.getElementById("btn-cam").classList.add("hidden");
+        document.getElementById("btn-stop").classList.remove("hidden");
+        showMsg("");
+        try {
+          await scanner.start(
+            { facingMode: "environment" },
+            { fps: 8, qrbox: { width: 220, height: 220 } },
+            (decoded) => {
+              const id = parseQr(decoded);
+              if (id) {
+                loadProduct(id);
+                scanner
+                  .stop()
+                  .then(() => {
+                    scanner.clear();
+                    scanner = null;
+                    document.getElementById("btn-cam").classList.remove("hidden");
+                    document.getElementById("btn-stop").classList.add("hidden");
+                  })
+                  .catch(() => {});
+              }
+            },
+            () => {}
+          );
+        } catch (e) {
+          document.getElementById("btn-cam").classList.remove("hidden");
+          document.getElementById("btn-stop").classList.add("hidden");
+          showMsg(
+            "Камера недоступна: " +
+              (e.message || e) +
+              ". Используйте вкладку «По ID» или откройте сайт по localhost/https.",
+            false
+          );
+        }
+      };
+
+      document.getElementById("btn-stop").onclick = async () => {
+        if (scanner) {
+          try {
+            await scanner.stop();
+            scanner.clear();
+          } catch (_) {}
+          scanner = null;
+        }
+        document.getElementById("btn-cam").classList.remove("hidden");
+        document.getElementById("btn-stop").classList.add("hidden");
+      };
+
+      (async () => {
+        try {
+          const { role } = await api("/api/auth/me");
+          if (!role) {
+            document.getElementById("gate").classList.remove("hidden");
+            document.getElementById("app").classList.add("hidden");
+            return;
+          }
+          document.getElementById("gate").classList.add("hidden");
+          document.getElementById("link-admin").classList.toggle("hidden", role !== "admin");
+        } catch {
+          document.getElementById("gate").classList.remove("hidden");
+          document.getElementById("app").classList.add("hidden");
+        }
+      })();
+    </script>
+  </body>
+</html>

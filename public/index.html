@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>event.kg — склад</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>event.kg</strong>
+        <span>inventory</span>
+      </div>
+      <div id="nav-actions"></div>
+    </header>
+
+    <main class="container">
+      <section class="hero">
+        <h1>Склад и инвентаризация</h1>
+        <p>Вход для склада и администратора. Сканируйте QR на товаре для приёма и отгрузки.</p>
+      </section>
+
+      <div id="msg"></div>
+
+      <div id="panel-login" class="card grid grid-2">
+        <div>
+          <h2>Склад</h2>
+          <p style="color: var(--muted); margin-top: 0; font-size: 0.9rem">
+            Приём и отгрузка по QR-коду.
+          </p>
+          <label for="pw-staff">Пароль склада</label>
+          <input id="pw-staff" type="password" autocomplete="current-password" />
+          <div style="margin-top: 1rem">
+            <button type="button" class="btn btn-primary" id="btn-staff">Войти</button>
+          </div>
+        </div>
+        <div>
+          <h2>Администратор</h2>
+          <p style="color: var(--muted); margin-top: 0; font-size: 0.9rem">
+            Товары, остатки, удаление, журнал движений.
+          </p>
+          <label for="pw-admin">Пароль администратора</label>
+          <input id="pw-admin" type="password" autocomplete="current-password" />
+          <div style="margin-top: 1rem">
+            <button type="button" class="btn btn-primary" id="btn-admin">Войти</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="panel-done" class="card hidden">
+        <h2>Вы вошли</h2>
+        <div class="flex" style="margin-top: 1rem">
+          <a class="btn btn-primary" id="link-warehouse" href="/warehouse.html">Склад и QR</a>
+          <a class="btn btn-ghost hidden" id="link-admin" href="/admin.html">Админ-панель</a>
+          <button type="button" class="btn btn-ghost" id="btn-logout">Выйти</button>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const msgEl = document.getElementById("msg");
+      const panelLogin = document.getElementById("panel-login");
+      const panelDone = document.getElementById("panel-done");
+      const linkAdmin = document.getElementById("link-admin");
+      const navActions = document.getElementById("nav-actions");
+
+      function showMsg(text, ok) {
+        msgEl.innerHTML = text
+          ? `<div class="msg ${ok ? "msg-ok" : "msg-error"}">${text}</div>`
+          : "";
+      }
+
+      async function api(path, opt) {
+        const r = await fetch(path, {
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...(opt?.headers || {}) },
+          ...opt,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || r.statusText);
+        return data;
+      }
+
+      function renderNav(role) {
+        if (!role) {
+          navActions.innerHTML = "";
+          return;
+        }
+        navActions.innerHTML =
+          '<a class="btn btn-sm btn-ghost" href="/warehouse.html">Склад</a>' +
+          (role === "admin"
+            ? ' <a class="btn btn-sm btn-ghost" href="/admin.html">Админ</a>'
+            : "") +
+          ' <button type="button" class="btn btn-sm btn-ghost" id="nav-logout">Выйти</button>';
+        document.getElementById("nav-logout")?.addEventListener("click", logout);
+      }
+
+      async function refresh() {
+        showMsg("");
+        try {
+          const { role } = await api("/api/auth/me");
+          if (role) {
+            panelLogin.classList.add("hidden");
+            panelDone.classList.remove("hidden");
+            linkAdmin.classList.toggle("hidden", role !== "admin");
+            document.getElementById("link-warehouse").classList.remove("hidden");
+            renderNav(role);
+          } else {
+            panelLogin.classList.remove("hidden");
+            panelDone.classList.add("hidden");
+            renderNav(null);
+          }
+        } catch {
+          panelLogin.classList.remove("hidden");
+          panelDone.classList.add("hidden");
+          renderNav(null);
+        }
+      }
+
+      async function login(password, asAdmin) {
+        showMsg("");
+        try {
+          await api("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ password, asAdmin }),
+          });
+          await refresh();
+          showMsg("Добро пожаловать.", true);
+        } catch (e) {
+          showMsg(e.message, false);
+        }
+      }
+
+      async function logout() {
+        try {
+          await api("/api/auth/logout", { method: "POST" });
+        } catch (_) {}
+        await refresh();
+        showMsg("Вы вышли.", true);
+      }
+
+      document.getElementById("btn-staff").onclick = () =>
+        login(document.getElementById("pw-staff").value, false);
+      document.getElementById("btn-admin").onclick = () =>
+        login(document.getElementById("pw-admin").value, true);
+      document.getElementById("btn-logout").onclick = logout;
+
+      refresh();
+    </script>
+  </body>
+</html>
