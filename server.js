@@ -4,11 +4,13 @@ const path = require("path");
 const crypto = require("crypto");
 const express = require("express");
 const cookieParser = require("cookie-parser");
+const multer = require("multer");
 const QRCode = require("qrcode");
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.join(__dirname, "data");
 const DB_PATH = path.join(DATA_DIR, "database.json");
+const UPLOADS_DIR = path.join(__dirname, "uploads");
 const STAFF_PASSWORD = process.env.STAFF_PASSWORD || "sklad2026";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin2026";
 const COOKIE_NAME = "eventkg_session";
@@ -16,6 +18,7 @@ const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function ensureDb() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   if (!fs.existsSync(DB_PATH)) {
     const initial = {
       products: [],
@@ -64,6 +67,22 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/uploads", express.static(UPLOADS_DIR, { fallthrough: false }));
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "").toLowerCase();
+      cb(null, `${crypto.randomUUID()}${ext || ""}`);
+    },
+  }),
+  limits: { fileSize: 6 * 1024 * 1024, files: 6 },
+  fileFilter: (_req, file, cb) => {
+    const ok = ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.mimetype);
+    cb(ok ? null : new Error("Разрешены только изображения (jpg/png/webp/gif)"), ok);
+  },
+});
 
 function authStaff(req, res, next) {
   const s = parseSession(req.cookies[COOKIE_NAME]);
@@ -157,6 +176,7 @@ app.post("/api/products", authAdmin, (req, res) => {
     category: typeof category === "string" ? category.trim() : "",
     note: typeof note === "string" ? note.trim() : "",
     quantity: qty,
+    photos: [],
     createdAt: new Date().toISOString(),
   };
   db.products.push(product);
@@ -183,11 +203,59 @@ app.patch("/api/products/:id", authAdmin, (req, res) => {
 
 app.delete("/api/products/:id", authAdmin, (req, res) => {
   const db = readDb();
-  const before = db.products.length;
-  db.products = db.products.filter((x) => x.id !== req.params.id);
-  if (db.products.length === before) return res.status(404).json({ error: "Товар не найден" });
+  const idx = db.products.findIndex((x) => x.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Товар не найден" });
+  const p = db.products[idx];
+  if (Array.isArray(p.photos)) {
+    for (const rel of p.photos) {
+      const safe = String(rel || "");
+      const full = path.join(__dirname, safe.startsWith("/") ? safe.slice(1) : safe);
+      if (full.startsWith(UPLOADS_DIR) && fs.existsSync(full)) {
+        try {
+          fs.unlinkSync(full);
+        } catch {}
+      }
+    }
+  }
+  db.products.splice(idx, 1);
   writeDb(db);
   res.json({ ok: true });
+});
+
+app.post("/api/products/:id/photos", authAdmin, upload.array("photos", 6), (req, res) => {
+  const db = readDb();
+  const p = db.products.find((x) => x.id === req.params.id);
+  if (!p) return res.status(404).json({ error: "Товар не найден" });
+  if (!Array.isArray(p.photos)) p.photos = [];
+  const files = Array.isArray(req.files) ? req.files : [];
+  const added = files.map((f) => `/uploads/${f.filename}`);
+  p.photos.unshift(...added);
+  p.photos = p.photos.slice(0, 10);
+  p.updatedAt = new Date().toISOString();
+  writeDb(db);
+  res.json({ ok: true, photos: p.photos });
+});
+
+app.delete("/api/products/:id/photos", authAdmin, (req, res) => {
+  const { url } = req.body || {};
+  if (!url || typeof url !== "string") return res.status(400).json({ error: "Укажите url" });
+  const db = readDb();
+  const p = db.products.find((x) => x.id === req.params.id);
+  if (!p) return res.status(404).json({ error: "Товар не найден" });
+  if (!Array.isArray(p.photos)) p.photos = [];
+  const before = p.photos.length;
+  p.photos = p.photos.filter((x) => x !== url);
+  if (p.photos.length === before) return res.status(404).json({ error: "Фото не найдено" });
+  const safe = String(url);
+  const full = path.join(__dirname, safe.startsWith("/") ? safe.slice(1) : safe);
+  if (full.startsWith(UPLOADS_DIR) && fs.existsSync(full)) {
+    try {
+      fs.unlinkSync(full);
+    } catch {}
+  }
+  p.updatedAt = new Date().toISOString();
+  writeDb(db);
+  res.json({ ok: true, photos: p.photos });
 });
 
 function recordMovement(db, { productId, type, amount, userRole, note }) {
