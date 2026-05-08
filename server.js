@@ -128,10 +128,11 @@ app.post("/api/auth/login", (req, res) => {
       exp: Date.now() + SESSION_MAX_AGE_MS,
     });
     res.cookie(COOKIE_NAME, token, {
-      httpOnly: true,
-      sameSite: "lax",
-      maxAge: SESSION_MAX_AGE_MS,
-    });
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production" || !!process.env.RAILWAY_ENVIRONMENT,
+  maxAge: SESSION_MAX_AGE_MS,
+});
     return res.json({ ok: true, role: "admin" });
   }
   if (password !== STAFF_PASSWORD) {
