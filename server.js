@@ -1,40 +1,56 @@
 require("dotenv").config();
-const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const multer = require("multer");
 const QRCode = require("qrcode");
+const { createClient } = require("@supabase/supabase-js");
 
 const PORT = Number(process.env.PORT) || 3000;
-const DATA_DIR = path.join(__dirname, "data");
-const DB_PATH = path.join(DATA_DIR, "database.json");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const STAFF_PASSWORD = process.env.STAFF_PASSWORD || "sklad2026";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin2026";
 const COOKIE_NAME = "eventkg_session";
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const BUCKET = "product-photos";
 
-function ensureDb() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  if (!fs.existsSync(DB_PATH)) {
-    const initial = {
-      products: [],
-      movements: [],
-    };
-    fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2), "utf8");
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("Задайте SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY в .env (см. .env.example).");
+  process.exit(1);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+function mapProduct(row) {
+  let photos = row.photo_urls;
+  if (!Array.isArray(photos)) {
+    try {
+      photos = typeof photos === "string" ? JSON.parse(photos || "[]") : [];
+    } catch {
+      photos = [];
+    }
   }
-}
-
-function readDb() {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
-}
-
-function writeDb(db) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
+  const cat = row.categories;
+  const categoryName = cat && typeof cat === "object" && !Array.isArray(cat) && cat.name ? cat.name : "";
+  return {
+    id: row.id,
+    name: row.name,
+    sku: row.sku || "",
+    unit: row.unit || "шт",
+    category: categoryName,
+    category_id: row.category_id,
+    note: row.note || "",
+    quantity: row.quantity,
+    photos,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function signSession(payload) {
@@ -70,13 +86,7 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static(UPLOADS_DIR, { fallthrough: false }));
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-    filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname || "").toLowerCase();
-      cb(null, `${crypto.randomUUID()}${ext || ""}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 6 * 1024 * 1024, files: 6 },
   fileFilter: (_req, file, cb) => {
     const ok = ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.mimetype);
@@ -148,193 +158,360 @@ app.get("/api/auth/me", (req, res) => {
   return res.json({ role: s.role });
 });
 
-app.get("/api/products", authStaff, (_req, res) => {
-  const db = readDb();
-  res.json(db.products);
+function sanitizeSearch(q) {
+  return String(q || "")
+    .trim()
+    .replace(/%/g, "")
+    .replace(/,/g, " ")
+    .slice(0, 100);
+}
+
+app.get("/api/categories", authStaff, async (_req, res) => {
+  try {
+    const { data, error } = await supabase.from("categories").select("id,name,created_at").order("name");
+    if (error) throw error;
+    res.json(data || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
 });
 
-app.get("/api/products/:id", authStaff, (req, res) => {
-  const db = readDb();
-  const p = db.products.find((x) => x.id === req.params.id);
-  if (!p) return res.status(404).json({ error: "Товар не найден" });
-  res.json(p);
+app.post("/api/categories", authAdmin, async (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name) return res.status(400).json({ error: "Укажите название категории" });
+  try {
+    const { data, error } = await supabase.from("categories").insert({ name }).select("id,name,created_at").single();
+    if (error) {
+      if (error.code === "23505") return res.status(409).json({ error: "Категория с таким именем уже есть" });
+      throw error;
+    }
+    res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
 });
 
-app.post("/api/products", authAdmin, (req, res) => {
-  const { name, sku, unit, quantity, category, note } = req.body || {};
+app.patch("/api/categories/:id", authAdmin, async (req, res) => {
+  const id = req.params.id;
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name) return res.status(400).json({ error: "Укажите название" });
+  try {
+    const { data, error } = await supabase
+      .from("categories")
+      .update({ name })
+      .eq("id", id)
+      .select("id,name,created_at")
+      .single();
+    if (error) {
+      if (error.code === "23505") return res.status(409).json({ error: "Имя занято" });
+      throw error;
+    }
+    if (!data) return res.status(404).json({ error: "Категория не найдена" });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
+});
+
+app.delete("/api/categories/:id", authAdmin, async (req, res) => {
+  const id = req.params.id;
+  try {
+    await supabase.from("products").update({ category_id: null }).eq("category_id", id);
+    const { error } = await supabase.from("categories").delete().eq("id", id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
+});
+
+async function listProducts(searchRaw) {
+  const q = sanitizeSearch(searchRaw);
+  const select = "*, categories(name)";
+  if (!q) {
+    const { data, error } = await supabase.from("products").select(select).order("name");
+    if (error) throw error;
+    return (data || []).map(mapProduct);
+  }
+  const pattern = `%${q}%`;
+  const { data: catRows, error: catErr } = await supabase.from("categories").select("id").ilike("name", pattern);
+  if (catErr) throw catErr;
+  const catIds = (catRows || []).map((c) => c.id);
+  const orParts = [`name.ilike.${pattern}`, `sku.ilike.${pattern}`];
+  if (catIds.length) orParts.push(`category_id.in.(${catIds.join(",")})`);
+  const { data, error } = await supabase.from("products").select(select).or(orParts.join(",")).order("name");
+  if (error) throw error;
+  return (data || []).map(mapProduct);
+}
+
+app.get("/api/products", authStaff, async (req, res) => {
+  try {
+    const list = await listProducts(req.query.q);
+    res.json(list);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
+});
+
+app.get("/api/products/:id", authStaff, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("products")
+      .select("*, categories(name)")
+      .eq("id", req.params.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: "Товар не найден" });
+    res.json(mapProduct(data));
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
+});
+
+app.post("/api/products", authAdmin, async (req, res) => {
+  const { name, sku, unit, quantity, category_id, note } = req.body || {};
   if (!name || typeof name !== "string" || !name.trim()) {
     return res.status(400).json({ error: "Укажите название товара" });
   }
-  const db = readDb();
-  const id = crypto.randomUUID();
   const qty = Math.max(0, Math.floor(Number(quantity) || 0));
-  const product = {
-    id,
+  const row = {
     name: name.trim(),
     sku: typeof sku === "string" ? sku.trim() : "",
     unit: typeof unit === "string" && unit.trim() ? unit.trim() : "шт",
-    category: typeof category === "string" ? category.trim() : "",
+    category_id: typeof category_id === "string" && category_id ? category_id : null,
     note: typeof note === "string" ? note.trim() : "",
     quantity: qty,
-    photos: [],
-    createdAt: new Date().toISOString(),
+    photo_urls: [],
   };
-  db.products.push(product);
-  writeDb(db);
-  res.status(201).json(product);
-});
-
-app.patch("/api/products/:id", authAdmin, (req, res) => {
-  const db = readDb();
-  const idx = db.products.findIndex((x) => x.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: "Товар не найден" });
-  const { name, sku, unit, category, note } = req.body || {};
-  const p = db.products[idx];
-  if (name !== undefined) p.name = String(name).trim() || p.name;
-  if (sku !== undefined) p.sku = String(sku).trim();
-  if (unit !== undefined) p.unit = String(unit).trim() || p.unit;
-  if (category !== undefined) p.category = String(category).trim();
-  if (note !== undefined) p.note = String(note).trim();
-  p.updatedAt = new Date().toISOString();
-  db.products[idx] = p;
-  writeDb(db);
-  res.json(p);
-});
-
-app.delete("/api/products/:id", authAdmin, (req, res) => {
-  const db = readDb();
-  const idx = db.products.findIndex((x) => x.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: "Товар не найден" });
-  const p = db.products[idx];
-  if (Array.isArray(p.photos)) {
-    for (const rel of p.photos) {
-      const safe = String(rel || "");
-      const full = path.join(__dirname, safe.startsWith("/") ? safe.slice(1) : safe);
-      if (full.startsWith(UPLOADS_DIR) && fs.existsSync(full)) {
-        try {
-          fs.unlinkSync(full);
-        } catch {}
-      }
-    }
+  try {
+    const { data, error } = await supabase.from("products").insert(row).select("*, categories(name)").single();
+    if (error) throw error;
+    res.status(201).json(mapProduct(data));
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
   }
-  db.products.splice(idx, 1);
-  writeDb(db);
-  res.json({ ok: true });
 });
 
-app.post("/api/products/:id/photos", authAdmin, upload.array("photos", 6), (req, res) => {
-  const db = readDb();
-  const p = db.products.find((x) => x.id === req.params.id);
-  if (!p) return res.status(404).json({ error: "Товар не найден" });
-  if (!Array.isArray(p.photos)) p.photos = [];
-  const files = Array.isArray(req.files) ? req.files : [];
-  const added = files.map((f) => `/uploads/${f.filename}`);
-  p.photos.unshift(...added);
-  p.photos = p.photos.slice(0, 10);
-  p.updatedAt = new Date().toISOString();
-  writeDb(db);
-  res.json({ ok: true, photos: p.photos });
-});
-
-app.delete("/api/products/:id/photos", authAdmin, (req, res) => {
-  const { url } = req.body || {};
-  if (!url || typeof url !== "string") return res.status(400).json({ error: "Укажите url" });
-  const db = readDb();
-  const p = db.products.find((x) => x.id === req.params.id);
-  if (!p) return res.status(404).json({ error: "Товар не найден" });
-  if (!Array.isArray(p.photos)) p.photos = [];
-  const before = p.photos.length;
-  p.photos = p.photos.filter((x) => x !== url);
-  if (p.photos.length === before) return res.status(404).json({ error: "Фото не найдено" });
-  const safe = String(url);
-  const full = path.join(__dirname, safe.startsWith("/") ? safe.slice(1) : safe);
-  if (full.startsWith(UPLOADS_DIR) && fs.existsSync(full)) {
-    try {
-      fs.unlinkSync(full);
-    } catch {}
+app.patch("/api/products/:id", authAdmin, async (req, res) => {
+  const id = req.params.id;
+  const { name, sku, unit, category_id, note, quantity } = req.body || {};
+  const patch = { updated_at: new Date().toISOString() };
+  if (name !== undefined) {
+    const t = String(name).trim();
+    if (!t) return res.status(400).json({ error: "Название не может быть пустым" });
+    patch.name = t;
   }
-  p.updatedAt = new Date().toISOString();
-  writeDb(db);
-  res.json({ ok: true, photos: p.photos });
+  if (sku !== undefined) patch.sku = String(sku).trim();
+  if (unit !== undefined) patch.unit = String(unit).trim() || "шт";
+  if (note !== undefined) patch.note = String(note).trim();
+  if (category_id !== undefined) patch.category_id = category_id === null || category_id === "" ? null : String(category_id);
+  if (quantity !== undefined) {
+    const q = Math.max(0, Math.floor(Number(quantity)));
+    if (Number.isNaN(q)) return res.status(400).json({ error: "Некорректное количество" });
+    patch.quantity = q;
+  }
+  try {
+    const { data, error } = await supabase
+      .from("products")
+      .update(patch)
+      .eq("id", id)
+      .select("*, categories(name)")
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: "Товар не найден" });
+    res.json(mapProduct(data));
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
 });
 
-function recordMovement(db, { productId, type, amount, userRole, note }) {
-  db.movements.unshift({
-    id: crypto.randomUUID(),
-    productId,
-    type,
-    amount,
-    userRole,
-    note: note || "",
-    at: new Date().toISOString(),
-  });
-  db.movements = db.movements.slice(0, 2000);
+function publicObjectUrl(objectPath) {
+  const base = SUPABASE_URL.replace(/\/$/, "");
+  return `${base}/storage/v1/object/public/${BUCKET}/${objectPath}`;
 }
 
-app.post("/api/stock/receive", authStaff, (req, res) => {
-  const { productId, amount, note } = req.body || {};
-  if (!productId || typeof productId !== "string") {
-    return res.status(400).json({ error: "Укажите товар" });
+function pathFromPublicPhotoUrl(url) {
+  const marker = `/object/public/${BUCKET}/`;
+  const i = String(url).indexOf(marker);
+  if (i === -1) return null;
+  return decodeURIComponent(String(url).slice(i + marker.length));
+}
+
+app.delete("/api/products/:id", authAdmin, async (req, res) => {
+  const id = req.params.id;
+  try {
+    const { data: p, error: fe } = await supabase.from("products").select("photo_urls").eq("id", id).maybeSingle();
+    if (fe) throw fe;
+    if (!p) return res.status(404).json({ error: "Товар не найден" });
+    const urls = Array.isArray(p.photo_urls) ? p.photo_urls : [];
+    for (const u of urls) {
+      const objectPath = pathFromPublicPhotoUrl(u);
+      if (objectPath) await supabase.storage.from(BUCKET).remove([objectPath]);
+    }
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
   }
-  const n = Math.max(1, Math.floor(Number(amount) || 0));
-  if (!n) return res.status(400).json({ error: "Укажите количество" });
-  const db = readDb();
-  const p = db.products.find((x) => x.id === productId);
-  if (!p) return res.status(404).json({ error: "Товар не найден" });
-  p.quantity += n;
-  p.updatedAt = new Date().toISOString();
-  recordMovement(db, {
-    productId,
-    type: "receive",
-    amount: n,
-    userRole: req.session.role,
-    note,
-  });
-  writeDb(db);
-  res.json({ product: p });
 });
 
-app.post("/api/stock/ship", authStaff, (req, res) => {
-  const { productId, amount, note } = req.body || {};
-  if (!productId || typeof productId !== "string") {
-    return res.status(400).json({ error: "Укажите товар" });
+app.post("/api/products/:id/photos", authAdmin, upload.array("photos", 6), async (req, res) => {
+  const id = req.params.id;
+  const files = Array.isArray(req.files) ? req.files : [];
+  if (!files.length) return res.status(400).json({ error: "Нет файлов" });
+  try {
+    const { data: p, error: pe } = await supabase.from("products").select("photo_urls").eq("id", id).maybeSingle();
+    if (pe) throw pe;
+    if (!p) return res.status(404).json({ error: "Товар не найден" });
+    let photos = Array.isArray(p.photo_urls) ? [...p.photo_urls] : [];
+    const added = [];
+    for (const f of files) {
+      const ext = path.extname(f.originalname || "").toLowerCase() || ".jpg";
+      const objectPath = `${id}/${crypto.randomUUID()}${ext}`;
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(objectPath, f.buffer, {
+        contentType: f.mimetype,
+        upsert: false,
+      });
+      if (upErr) throw upErr;
+      added.push(publicObjectUrl(objectPath));
+    }
+    photos = [...added, ...photos].slice(0, 10);
+    const { data: updated, error: ue } = await supabase
+      .from("products")
+      .update({ photo_urls: photos, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("photo_urls")
+      .single();
+    if (ue) throw ue;
+    res.json({ ok: true, photos: updated.photo_urls });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка загрузки" });
   }
-  const n = Math.max(1, Math.floor(Number(amount) || 0));
-  if (!n) return res.status(400).json({ error: "Укажите количество" });
-  const db = readDb();
-  const p = db.products.find((x) => x.id === productId);
-  if (!p) return res.status(404).json({ error: "Товар не найден" });
-  if (p.quantity < n) {
-    return res.status(400).json({ error: "Недостаточно на складе", quantity: p.quantity });
-  }
-  p.quantity -= n;
-  p.updatedAt = new Date().toISOString();
-  recordMovement(db, {
-    productId,
-    type: "ship",
-    amount: n,
-    userRole: req.session.role,
-    note,
-  });
-  writeDb(db);
-  res.json({ product: p });
 });
 
-app.get("/api/movements", authAdmin, (_req, res) => {
-  const db = readDb();
-  const list = db.movements.slice(0, 200).map((m) => {
-    const p = db.products.find((x) => x.id === m.productId);
-    return { ...m, productName: p ? p.name : "(удалён)" };
+app.delete("/api/products/:id/photos", authAdmin, async (req, res) => {
+  const { url } = req.body || {};
+  if (!url || typeof url !== "string") return res.status(400).json({ error: "Укажите url" });
+  const id = req.params.id;
+  try {
+    const { data: p, error: pe } = await supabase.from("products").select("photo_urls").eq("id", id).maybeSingle();
+    if (pe) throw pe;
+    if (!p) return res.status(404).json({ error: "Товар не найден" });
+    let photos = Array.isArray(p.photo_urls) ? p.photo_urls : [];
+    const before = photos.length;
+    photos = photos.filter((x) => x !== url);
+    if (photos.length === before) return res.status(404).json({ error: "Фото не найдено" });
+    const objectPath = pathFromPublicPhotoUrl(url);
+    if (objectPath) await supabase.storage.from(BUCKET).remove([objectPath]);
+    const { error: ue } = await supabase
+      .from("products")
+      .update({ photo_urls: photos, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (ue) throw ue;
+    res.json({ ok: true, photos });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
+});
+
+async function recordMovement({ productId, type, amount, userRole, note }) {
+  const { error } = await supabase.from("stock_movements").insert({
+    product_id: productId,
+    type,
+    amount,
+    user_role: userRole,
+    note: note || "",
   });
-  res.json(list);
+  if (error) throw error;
+}
+
+app.post("/api/stock/receive", authStaff, async (req, res) => {
+  const { productId, amount, note } = req.body || {};
+  if (!productId || typeof productId !== "string") return res.status(400).json({ error: "Укажите товар" });
+  const n = Math.max(1, Math.floor(Number(amount) || 0));
+  if (!n) return res.status(400).json({ error: "Укажите количество" });
+  try {
+    const { data: p, error: fe } = await supabase.from("products").select("quantity").eq("id", productId).maybeSingle();
+    if (fe) throw fe;
+    if (!p) return res.status(404).json({ error: "Товар не найден" });
+    const newQty = p.quantity + n;
+    const { data: updated, error: ue } = await supabase
+      .from("products")
+      .update({ quantity: newQty, updated_at: new Date().toISOString() })
+      .eq("id", productId)
+      .select("*, categories(name)")
+      .single();
+    if (ue) throw ue;
+    await recordMovement({ productId, type: "receive", amount: n, userRole: req.session.role, note });
+    res.json({ product: mapProduct(updated) });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
+});
+
+app.post("/api/stock/ship", authStaff, async (req, res) => {
+  const { productId, amount, note } = req.body || {};
+  if (!productId || typeof productId !== "string") return res.status(400).json({ error: "Укажите товар" });
+  const n = Math.max(1, Math.floor(Number(amount) || 0));
+  if (!n) return res.status(400).json({ error: "Укажите количество" });
+  try {
+    const { data: p, error: fe } = await supabase.from("products").select("quantity").eq("id", productId).maybeSingle();
+    if (fe) throw fe;
+    if (!p) return res.status(404).json({ error: "Товар не найден" });
+    if (p.quantity < n) return res.status(400).json({ error: "Недостаточно на складе", quantity: p.quantity });
+    const newQty = p.quantity - n;
+    const { data: updated, error: ue } = await supabase
+      .from("products")
+      .update({ quantity: newQty, updated_at: new Date().toISOString() })
+      .eq("id", productId)
+      .select("*, categories(name)")
+      .single();
+    if (ue) throw ue;
+    await recordMovement({ productId, type: "ship", amount: n, userRole: req.session.role, note });
+    res.json({ product: mapProduct(updated) });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
+});
+
+app.get("/api/movements", authAdmin, async (_req, res) => {
+  try {
+    const { data: movements, error: me } = await supabase
+      .from("stock_movements")
+      .select("id,product_id,type,amount,user_role,note,at")
+      .order("at", { ascending: false })
+      .limit(200);
+    if (me) throw me;
+    const ids = [...new Set((movements || []).map((m) => m.product_id))];
+    let nameById = {};
+    if (ids.length) {
+      const { data: prods, error: pe } = await supabase.from("products").select("id,name").in("id", ids);
+      if (pe) throw pe;
+      nameById = Object.fromEntries((prods || []).map((p) => [p.id, p.name]));
+    }
+    const list = (movements || []).map((m) => ({
+      id: m.id,
+      productId: m.product_id,
+      type: m.type,
+      amount: m.amount,
+      userRole: m.user_role,
+      note: m.note,
+      at: m.at,
+      productName: nameById[m.product_id] || "(удалён)",
+    }));
+    res.json(list);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
 });
 
 app.get("/api/products/:id/qr.svg", authStaff, async (req, res) => {
-  const db = readDb();
-  const p = db.products.find((x) => x.id === req.params.id);
-  if (!p) return res.status(404).send("Not found");
-  const payload = JSON.stringify({ v: 1, id: p.id });
   try {
+    const { data: p, error } = await supabase.from("products").select("id").eq("id", req.params.id).maybeSingle();
+    if (error) throw error;
+    if (!p) return res.status(404).send("Not found");
+    const payload = JSON.stringify({ v: 1, id: p.id });
     const svg = await QRCode.toString(payload, { type: "svg", margin: 1, width: 256 });
     res.type("image/svg+xml").send(svg);
   } catch (e) {
@@ -342,7 +519,6 @@ app.get("/api/products/:id/qr.svg", authStaff, async (req, res) => {
   }
 });
 
-ensureDb();
 app.listen(PORT, () => {
-  console.log(`event.kg inventory → http://localhost:${PORT}`);
+  console.log(`Склад → http://localhost:${PORT} (Supabase)`);
 });

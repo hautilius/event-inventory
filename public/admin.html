@@ -11,6 +11,163 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
+    <style>
+      /* ── Lightbox ── */
+      #lightbox {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        background: rgba(0,0,0,.92);
+        align-items: center;
+        justify-content: center;
+        touch-action: pan-y;
+      }
+      #lightbox.open { display: flex; }
+      #lightbox img {
+        max-width: 92vw;
+        max-height: 88vh;
+        object-fit: contain;
+        border-radius: 8px;
+        user-select: none;
+        pointer-events: none;
+        transition: opacity .18s;
+      }
+      #lightbox .lb-close {
+        position: absolute;
+        top: 1rem; right: 1.2rem;
+        font-size: 2rem;
+        color: #fff;
+        background: none;
+        border: none;
+        cursor: pointer;
+        line-height: 1;
+        opacity: .8;
+      }
+      #lightbox .lb-close:hover { opacity: 1; }
+      #lightbox .lb-arrow {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 2.2rem;
+        color: #fff;
+        background: none;
+        border: none;
+        cursor: pointer;
+        opacity: .7;
+        padding: 0.5rem;
+        line-height: 1;
+      }
+      #lightbox .lb-arrow:hover { opacity: 1; }
+      #lightbox .lb-prev { left: 0.5rem; }
+      #lightbox .lb-next { right: 0.5rem; }
+      #lightbox .lb-dots {
+        position: absolute;
+        bottom: 1.2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 6px;
+      }
+      #lightbox .lb-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: rgba(255,255,255,.4);
+        cursor: pointer;
+        border: none;
+        transition: background .15s;
+      }
+      #lightbox .lb-dot.active { background: #fff; }
+      #lightbox .lb-counter {
+        position: absolute;
+        top: 1rem; left: 50%;
+        transform: translateX(-50%);
+        color: rgba(255,255,255,.7);
+        font-size: 0.85rem;
+      }
+
+      /* ── Фото в модалке редактирования ── */
+      .edit-thumbs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 0.5rem;
+      }
+      .edit-thumb {
+        position: relative;
+        width: 72px;
+        height: 72px;
+        flex-shrink: 0;
+      }
+      .edit-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .edit-thumb .del-ph {
+        position: absolute;
+        top: -5px; right: -5px;
+        width: 20px; height: 20px;
+        border-radius: 50%;
+        background: #e53;
+        color: #fff;
+        border: none;
+        font-size: 12px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+      }
+
+      /* ── Сетка карточек товаров 2 колонки ── */
+      .prod-cards {
+        display: grid !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+      @media (max-width: 600px) {
+        .prod-cards { grid-template-columns: 1fr !important; }
+      }
+
+      /* ── Миниатюры в таблице ── */
+      .thumbs { display: flex; flex-wrap: wrap; gap: 4px; }
+      .thumb { position: relative; display: inline-block; }
+      .thumb img {
+        width: 64px; height: 64px;
+        object-fit: cover;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .btn-photo-del {
+        position: absolute;
+        top: -4px; right: -4px;
+        width: 18px; height: 18px;
+        font-size: 11px;
+        background: #e53;
+        color: #fff;
+        border: none;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+      }
+
+      /* ── Карточки товаров ── */
+      .prod-card-photo img {
+        width: 80px; height: 80px;
+        object-fit: cover;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+
+      #prod-body td { vertical-align: middle; padding: 8px 10px; }
+    </style>
   </head>
   <body>
     <header class="topbar">
@@ -38,28 +195,25 @@
 
             <div class="flex" style="margin-top: 0.75rem">
               <div class="flex-grow">
-                <label for="f-sku">Артикул / код</label>
-                <input id="f-sku" />
-              </div>
-              <div class="flex-grow">
-                <label for="f-unit">Ед.</label>
-                <input id="f-unit" value="шт" />
-              </div>
-            </div>
-
-            <div class="flex" style="margin-top: 0.75rem">
-              <div class="flex-grow">
                 <label for="f-qty">Начальный остаток</label>
                 <input id="f-qty" type="number" min="0" value="0" />
               </div>
               <div class="flex-grow">
                 <label for="f-cat">Категория</label>
-                <input id="f-cat" placeholder="Свет, сцена…" />
+                <select id="f-cat">
+                  <option value="">— без категории —</option>
+                </select>
               </div>
             </div>
 
             <label for="f-note" style="margin-top: 0.75rem">Заметка</label>
             <textarea id="f-note"></textarea>
+
+            <label for="f-photos" style="margin-top: 0.75rem">Фото (необязательно)</label>
+            <input id="f-photos" type="file" accept="image/*" multiple />
+            <small style="color: var(--muted); display: block; margin-top: 0.25rem">
+              Можно выбрать до 6 фото (до 6 МБ каждое).
+            </small>
 
             <div style="margin-top: 1rem">
               <button type="button" class="btn btn-primary" id="btn-add">Добавить</button>
@@ -84,33 +238,180 @@
           </div>
         </div>
 
+        <div class="card">
+          <h2>Категории</h2>
+          <p style="color: var(--muted); margin-top: 0; font-size: 0.9rem">
+            Категории используются в товарах и в поиске на складе.
+          </p>
+          <div class="flex">
+            <div class="flex-grow">
+              <label for="new-cat">Новая категория</label>
+              <input id="new-cat" placeholder="Например: Свет" />
+            </div>
+            <button type="button" class="btn btn-primary" id="btn-cat-add" style="align-self: flex-end">Добавить</button>
+          </div>
+          <ul id="cat-list" class="cat-list"></ul>
+        </div>
+
         <div id="msg"></div>
 
         <div class="card">
           <h2>Товары</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Остаток</th>
-                  <th>QR</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="prod-body"></tbody>
-            </table>
-          </div>
+          <label for="prod-search">Живой поиск</label>
+          <input id="prod-search" type="search" placeholder="Название, артикул или категория…" autocomplete="off" />
+          <div id="prod-cards" class="prod-cards" aria-label="Список товаров"></div>
         </div>
       </div>
     </main>
 
+    <!-- ── Модалка редактирования ── -->
+    <div id="edit-overlay" class="modal-overlay hidden" aria-hidden="true">
+      <div class="modal-box" role="dialog" aria-labelledby="edit-title">
+        <h3 id="edit-title">Редактировать товар</h3>
+        <input type="hidden" id="edit-id" />
+
+        <label for="edit-name">Название *</label>
+        <input id="edit-name" />
+
+        <div class="flex" style="margin-top: 0.75rem">
+          <div class="flex-grow">
+            <label for="edit-qty">Остаток</label>
+            <input id="edit-qty" type="number" min="0" />
+          </div>
+          <div class="flex-grow">
+            <label for="edit-cat">Категория</label>
+            <select id="edit-cat">
+              <option value="">— без категории —</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="edit-note" style="margin-top: 0.75rem">Заметка</label>
+        <textarea id="edit-note"></textarea>
+
+        <!-- Фото в модалке -->
+        <div style="margin-top: 0.75rem">
+          <label>Фото</label>
+          <div id="edit-thumbs" class="edit-thumbs"></div>
+          <div class="flex" style="margin-top: 0.5rem; align-items: center; gap: 0.5rem;">
+            <input id="edit-photos-input" type="file" accept="image/*" multiple style="flex:1;" />
+            <button type="button" class="btn btn-sm btn-primary" id="edit-photos-upload">Загрузить</button>
+          </div>
+          <small style="color: var(--muted); display: block; margin-top: 0.25rem">
+            До 6 фото, до 6 МБ каждое. Нажмите на фото чтобы открыть, × чтобы удалить.
+          </small>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="edit-cancel">Отмена</button>
+          <button type="button" class="btn btn-primary" id="edit-save">Сохранить</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Лайтбокс ── -->
+    <div id="lightbox">
+      <button class="lb-close" id="lb-close" aria-label="Закрыть">×</button>
+      <button class="lb-arrow lb-prev" id="lb-prev" aria-label="Назад">‹</button>
+      <img id="lb-img" src="" alt="Фото" />
+      <button class="lb-arrow lb-next" id="lb-next" aria-label="Вперёд">›</button>
+      <div class="lb-counter" id="lb-counter"></div>
+      <div class="lb-dots" id="lb-dots"></div>
+    </div>
+
     <script>
       const msgEl = document.getElementById("msg");
+      let categories = [];
+      let productSearchTimer = null;
 
+      // ══════════════════════════════════════════
+      //  Лайтбокс
+      // ══════════════════════════════════════════
+      const lb = {
+        el: document.getElementById("lightbox"),
+        img: document.getElementById("lb-img"),
+        counter: document.getElementById("lb-counter"),
+        dots: document.getElementById("lb-dots"),
+        urls: [],
+        idx: 0,
+        touchStartX: 0,
+
+        open(urls, idx) {
+          this.urls = urls;
+          this.idx = idx || 0;
+          this.render();
+          this.el.classList.add("open");
+          document.body.style.overflow = "hidden";
+        },
+        close() {
+          this.el.classList.remove("open");
+          document.body.style.overflow = "";
+        },
+        go(delta) {
+          this.idx = (this.idx + delta + this.urls.length) % this.urls.length;
+          this.render();
+        },
+        render() {
+          this.img.style.opacity = "0";
+          const src = this.urls[this.idx];
+          setTimeout(() => {
+            this.img.src = src;
+            this.img.style.opacity = "1";
+          }, 80);
+          const total = this.urls.length;
+          this.counter.textContent = total > 1 ? (this.idx + 1) + " / " + total : "";
+          this.dots.innerHTML = total > 1
+            ? this.urls.map((_, i) =>
+                '<button class="lb-dot ' + (i === this.idx ? "active" : "") + '" data-i="' + i + '"></button>'
+              ).join("")
+            : "";
+          this.dots.querySelectorAll(".lb-dot").forEach((b) => {
+            b.onclick = () => { this.idx = +b.dataset.i; this.render(); };
+          });
+          document.getElementById("lb-prev").style.display = total > 1 ? "" : "none";
+          document.getElementById("lb-next").style.display = total > 1 ? "" : "none";
+        }
+      };
+
+      document.getElementById("lb-close").onclick = () => lb.close();
+      document.getElementById("lb-prev").onclick   = () => lb.go(-1);
+      document.getElementById("lb-next").onclick   = () => lb.go(1);
+      lb.el.addEventListener("click", (e) => { if (e.target === lb.el) lb.close(); });
+
+      // Свайп
+      lb.el.addEventListener("touchstart", (e) => {
+        lb.touchStartX = e.touches[0].clientX;
+      }, { passive: true });
+      lb.el.addEventListener("touchend", (e) => {
+        const dx = e.changedTouches[0].clientX - lb.touchStartX;
+        if (Math.abs(dx) > 40) lb.go(dx < 0 ? 1 : -1);
+      }, { passive: true });
+
+      // Клавиатура
+      document.addEventListener("keydown", (e) => {
+        if (!lb.el.classList.contains("open")) return;
+        if (e.key === "ArrowLeft")  lb.go(-1);
+        if (e.key === "ArrowRight") lb.go(1);
+        if (e.key === "Escape")     lb.close();
+      });
+
+      // Вспомогательная функция подключения лайтбокса ко всем img[data-photos]
+      function bindLightbox(root) {
+        (root || document).querySelectorAll("img[data-photos]").forEach((img) => {
+          img.onclick = () => {
+            try {
+              lb.open(JSON.parse(img.getAttribute("data-photos")), parseInt(img.dataset.idx || "0", 10));
+            } catch {}
+          };
+        });
+      }
+
+      // ══════════════════════════════════════════
+      //  API
+      // ══════════════════════════════════════════
       function showMsg(text, ok) {
         msgEl.innerHTML = text
-          ? `<div class="msg ${ok ? "msg-ok" : "msg-error"}">${text}</div>`
+          ? '<div class="msg ' + (ok ? "msg-ok" : "msg-error") + '">' + text + "</div>"
           : "";
       }
 
@@ -121,102 +422,324 @@
           ...opt,
         });
         const data = await r.json().catch(() => ({}));
-        if (r.status === 401) {
-          window.location.href = "/";
-          throw new Error("Нет доступа");
-        }
+        if (r.status === 401) { window.location.href = "/"; throw new Error("Нет доступа"); }
         if (!r.ok) throw new Error(data.error || r.statusText);
         return data;
       }
 
-      async function loadProducts() {
-        const list = await api("/api/products");
-        const tbody = document.getElementById("prod-body");
-        tbody.innerHTML = list
-          .map(
-            (p) => `
-          <tr data-id="${p.id}">
-            <td>
-              <strong>${escapeHtml(p.name)}</strong><br/>
-              <small style="color:var(--muted)">${escapeHtml(p.sku || "")} ${escapeHtml(p.category || "")}</small><br/>
-              <small style="color:var(--muted)">id: ${p.id}</small>
-            </td>
-            <td>${p.quantity} ${escapeHtml(p.unit || "шт")}</td>
-            <td>
-              <div class="qr-preview"><img src="/api/products/${p.id}/qr.svg" alt="QR" width="120" height="120" /></div>
-              <a href="/api/products/${p.id}/qr.svg" download="qr-${p.id}.svg">Скачать SVG</a>
-            </td>
-            <td>
-              <button type="button" class="btn btn-sm btn-danger btn-del" data-id="${p.id}">Удалить</button>
-            </td>
-          </tr>`
-          )
-          .join("");
-        tbody.querySelectorAll(".btn-del").forEach((btn) => {
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      }
+
+      // ══════════════════════════════════════════
+      //  Категории
+      // ══════════════════════════════════════════
+      function fillCategorySelects() {
+        const opts =
+          '<option value="">— без категории —</option>' +
+          categories.map((c) => '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name) + "</option>").join("");
+        document.getElementById("f-cat").innerHTML = opts;
+        document.getElementById("edit-cat").innerHTML = opts;
+      }
+
+      async function loadCategories() {
+        categories = await api("/api/categories");
+        fillCategorySelects();
+        const ul = document.getElementById("cat-list");
+        ul.innerHTML = categories.map((c) =>
+          '<li class="cat-chip">' + escapeHtml(c.name) +
+          ' <button type="button" data-cat-rename="' + escapeHtml(c.id) + '" title="Переименовать">✎</button>' +
+          ' <button type="button" data-cat-del="' + escapeHtml(c.id) + '" title="Удалить">×</button>' +
+          "</li>"
+        ).join("");
+
+        ul.querySelectorAll("[data-cat-rename]").forEach((btn) => {
+          btn.onclick = async () => {
+            const id  = btn.getAttribute("data-cat-rename");
+            const cur = categories.find((x) => x.id === id);
+            const name = prompt("Новое название категории", cur ? cur.name : "");
+            if (!name || !name.trim()) return;
+            try {
+              await api("/api/categories/" + encodeURIComponent(id), {
+                method: "PATCH", body: JSON.stringify({ name: name.trim() }),
+              });
+              showMsg("Категория обновлена.", true);
+              await loadCategories();
+              await loadProducts(document.getElementById("prod-search").value.trim());
+            } catch (e) { showMsg(e.message, false); }
+          };
+        });
+
+        ul.querySelectorAll("[data-cat-del]").forEach((btn) => {
+          btn.onclick = async () => {
+            if (!confirm("Удалить категорию? Товары останутся без этой категории.")) return;
+            const id = btn.getAttribute("data-cat-del");
+            try {
+              await api("/api/categories/" + encodeURIComponent(id), { method: "DELETE" });
+              showMsg("Категория удалена.", true);
+              await loadCategories();
+              await loadProducts(document.getElementById("prod-search").value.trim());
+            } catch (e) { showMsg(e.message, false); }
+          };
+        });
+      }
+
+      // ══════════════════════════════════════════
+      //  Товары
+      // ══════════════════════════════════════════
+      async function loadProducts(search) {
+        const q    = (search || "").trim();
+        const path = q ? "/api/products?q=" + encodeURIComponent(q) : "/api/products";
+        const list = await api(path);
+
+        // ── Карточки ──
+        const cards = document.getElementById("prod-cards");
+        cards.innerHTML = list.map((p) => {
+          const photos     = Array.isArray(p.photos) ? p.photos : [];
+          const firstPhoto = photos[0] || "";
+          const photosJson = escapeHtml(JSON.stringify(photos));
+          return (
+            '<article class="prod-card" data-id="' + escapeHtml(p.id) + '">' +
+            '<div class="prod-card-head">' +
+            '<div class="prod-card-title">' +
+            '<strong>' + escapeHtml(p.name) + "</strong>" +
+            "<small>" + escapeHtml([p.sku, p.category].filter(Boolean).join(" · ") || "—") + "</small>" +
+            "</div>" +
+            '<div class="prod-card-qty">' +
+            '<div class="prod-card-qty-num">' + p.quantity + "</div>" +
+            '<div class="prod-card-qty-unit">' + escapeHtml(p.unit || "шт") + "</div>" +
+            "</div></div>" +
+            '<div class="prod-card-media">' +
+            '<div class="prod-card-qr">' +
+            '<img src="/api/products/' + escapeHtml(p.id) + '/qr.svg" alt="QR" />' +
+            '<a href="/api/products/' + escapeHtml(p.id) + '/qr.svg" download="qr-' + escapeHtml(p.id) + '.svg">QR SVG</a>' +
+            "</div>" +
+            '<div class="prod-card-photo ' + (firstPhoto ? "" : "is-empty") + '">' +
+            (firstPhoto
+              ? '<img src="' + escapeHtml(firstPhoto) + '" alt="Фото" data-photos=\'' + photosJson + '\' data-idx="0" />'
+              : "<span>без фото</span>") +
+            "</div></div>" +
+            '<div class="prod-card-actions">' +
+            '<button type="button" class="btn btn-sm btn-ghost prod-edit" data-id="' + escapeHtml(p.id) + '">Изменить</button>' +
+            '<button type="button" class="btn btn-sm btn-danger prod-del"  data-id="' + escapeHtml(p.id) + '">Удалить</button>' +
+            "</div></article>"
+          );
+        }).join("");
+
+        // ── Обработчики карточек ──
+        cards.querySelectorAll(".prod-edit").forEach((btn) => {
+          btn.onclick = () => openEdit(btn.dataset.id);
+        });
+        cards.querySelectorAll(".prod-del").forEach((btn) => {
           btn.onclick = async () => {
             if (!confirm("Удалить товар безвозвратно?")) return;
             try {
               await api("/api/products/" + encodeURIComponent(btn.dataset.id), { method: "DELETE" });
               showMsg("Товар удалён.", true);
-              await loadProducts();
+              await loadProducts(document.getElementById("prod-search").value.trim());
               await loadMovements();
-            } catch (e) {
-              showMsg(e.message, false);
-            }
+            } catch (e) { showMsg(e.message, false); }
+          };
+        });
+
+        // Лайтбокс для всех фото в карточках
+        bindLightbox(cards);
+      }
+
+      // ══════════════════════════════════════════
+      //  Журнал
+      // ══════════════════════════════════════════
+      async function loadMovements() {
+        const list  = await api("/api/movements");
+        const tbody = document.getElementById("mov-body");
+        tbody.innerHTML = list.map((m) => {
+          const t  = new Date(m.at).toLocaleString("ru-RU");
+          const op = m.type === "receive" ? "Приём" : "Отгрузка";
+          return "<tr><td>" + escapeHtml(t) + "</td><td>" + escapeHtml(m.productName || "") + "</td><td>" + op + "</td><td>" + m.amount + "</td></tr>";
+        }).join("");
+      }
+
+      // ══════════════════════════════════════════
+      //  Модалка редактирования
+      // ══════════════════════════════════════════
+      let editCurrentPhotos = [];
+
+      function renderEditThumbs() {
+        const wrap = document.getElementById("edit-thumbs");
+        if (!editCurrentPhotos.length) {
+          wrap.innerHTML = '<span style="color:var(--muted);font-size:0.85rem;">Фото нет</span>';
+          return;
+        }
+        const photosJson = escapeHtml(JSON.stringify(editCurrentPhotos));
+        wrap.innerHTML = editCurrentPhotos.map((u, i) =>
+          '<div class="edit-thumb">' +
+          '<img src="' + escapeHtml(u) + '" alt="Фото" data-photos=\'' + photosJson + '\' data-idx="' + i + '" />' +
+          '<button type="button" class="del-ph" data-url="' + escapeHtml(u) + '" title="Удалить">×</button>' +
+          "</div>"
+        ).join("");
+
+        bindLightbox(wrap);
+
+        wrap.querySelectorAll(".del-ph").forEach((btn) => {
+          btn.onclick = async () => {
+            const id = document.getElementById("edit-id").value;
+            if (!confirm("Удалить фото?")) return;
+            try {
+              await api("/api/products/" + encodeURIComponent(id) + "/photos", {
+                method: "DELETE", body: JSON.stringify({ url: btn.dataset.url }),
+              });
+              editCurrentPhotos = editCurrentPhotos.filter((u) => u !== btn.dataset.url);
+              renderEditThumbs();
+              showMsg("Фото удалено.", true);
+              loadProducts(document.getElementById("prod-search").value.trim()).catch(() => {});
+            } catch (e) { showMsg(e.message, false); }
           };
         });
       }
 
-      function escapeHtml(s) {
-        return String(s)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;");
+      async function openEdit(id) {
+        showMsg("");
+        try {
+          const p = await api("/api/products/" + encodeURIComponent(id));
+          document.getElementById("edit-id").value   = p.id;
+          document.getElementById("edit-name").value = p.name;
+          document.getElementById("edit-qty").value  = p.quantity;
+          document.getElementById("edit-note").value = p.note || "";
+          document.getElementById("edit-photos-input").value = "";
+          fillCategorySelects();
+          document.getElementById("edit-cat").value  = p.category_id || "";
+
+          editCurrentPhotos = Array.isArray(p.photos) ? [...p.photos] : [];
+          renderEditThumbs();
+
+          document.getElementById("edit-overlay").classList.remove("hidden");
+          document.getElementById("edit-overlay").setAttribute("aria-hidden", "false");
+        } catch (e) { showMsg(e.message, false); }
       }
 
-      async function loadMovements() {
-        const list = await api("/api/movements");
-        const tbody = document.getElementById("mov-body");
-        tbody.innerHTML = list
-          .map((m) => {
-            const t = new Date(m.at).toLocaleString("ru-RU");
-            const op = m.type === "receive" ? "Приём" : "Отгрузка";
-            return `<tr><td>${escapeHtml(t)}</td><td>${escapeHtml(m.productName || "")}</td><td>${op}</td><td>${m.amount}</td></tr>`;
-          })
-          .join("");
+      function closeEdit() {
+        document.getElementById("edit-overlay").classList.add("hidden");
+        document.getElementById("edit-overlay").setAttribute("aria-hidden", "true");
       }
 
+      document.getElementById("edit-cancel").onclick = closeEdit;
+      document.getElementById("edit-overlay").addEventListener("click", (e) => {
+        if (e.target.id === "edit-overlay") closeEdit();
+      });
+
+      // Загрузка новых фото из модалки
+      document.getElementById("edit-photos-upload").onclick = async () => {
+        const id    = document.getElementById("edit-id").value;
+        const input = document.getElementById("edit-photos-input");
+        if (!input?.files?.length) { showMsg("Выберите файлы.", false); return; }
+        const fd = new FormData();
+        for (const f of Array.from(input.files).slice(0, 6)) fd.append("photos", f);
+        showMsg("");
+        try {
+          const r    = await fetch("/api/products/" + encodeURIComponent(id) + "/photos", {
+            method: "POST", credentials: "include", body: fd,
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || r.statusText);
+          const p = await api("/api/products/" + encodeURIComponent(id));
+          editCurrentPhotos = Array.isArray(p.photos) ? [...p.photos] : [];
+          renderEditThumbs();
+          input.value = "";
+          showMsg("Фото загружены.", true);
+          loadProducts(document.getElementById("prod-search").value.trim()).catch(() => {});
+        } catch (e) { showMsg(e.message, false); }
+      };
+
+      document.getElementById("edit-save").onclick = async () => {
+        const id   = document.getElementById("edit-id").value;
+        const name = document.getElementById("edit-name").value.trim();
+        if (!name) { showMsg("Введите название.", false); return; }
+        try {
+          await api("/api/products/" + encodeURIComponent(id), {
+            method: "PATCH",
+            body: JSON.stringify({
+              name,
+              quantity:    document.getElementById("edit-qty").value,
+              category_id: document.getElementById("edit-cat").value || null,
+              note:        document.getElementById("edit-note").value,
+            }),
+          });
+          showMsg("Товар сохранён.", true);
+          closeEdit();
+          await loadProducts(document.getElementById("prod-search").value.trim());
+          await loadMovements();
+        } catch (e) { showMsg(e.message, false); }
+      };
+
+      // ══════════════════════════════════════════
+      //  Добавление товара
+      // ══════════════════════════════════════════
       document.getElementById("btn-add").onclick = async () => {
         showMsg("");
         const name = document.getElementById("f-name").value.trim();
-        if (!name) {
-          showMsg("Введите название.", false);
-          return;
-        }
+        if (!name) { showMsg("Введите название.", false); return; }
         try {
-          await api("/api/products", {
+          const created = await api("/api/products", {
             method: "POST",
             body: JSON.stringify({
               name,
-              sku: document.getElementById("f-sku").value,
-              unit: document.getElementById("f-unit").value,
-              quantity: document.getElementById("f-qty").value,
-              category: document.getElementById("f-cat").value,
-              note: document.getElementById("f-note").value,
+              quantity:    document.getElementById("f-qty").value,
+              category_id: document.getElementById("f-cat").value || null,
+              note:        document.getElementById("f-note").value,
             }),
           });
-          document.getElementById("f-name").value = "";
-          document.getElementById("f-sku").value = "";
-          document.getElementById("f-qty").value = "0";
-          document.getElementById("f-note").value = "";
+
+          const inputPhotos = document.getElementById("f-photos");
+          const files = inputPhotos?.files ? Array.from(inputPhotos.files) : [];
+          if (created?.id && files.length) {
+            const fd = new FormData();
+            for (const f of files.slice(0, 6)) fd.append("photos", f);
+            const r    = await fetch("/api/products/" + encodeURIComponent(created.id) + "/photos", {
+              method: "POST", credentials: "include", body: fd,
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.error || r.statusText);
+          }
+
+          document.getElementById("f-name").value  = "";
+          document.getElementById("f-qty").value   = "0";
+          document.getElementById("f-note").value  = "";
+          if (inputPhotos) inputPhotos.value = "";
           showMsg("Товар добавлен.", true);
-          await loadProducts();
-        } catch (e) {
-          showMsg(e.message, false);
-        }
+          await loadProducts(document.getElementById("prod-search").value.trim());
+        } catch (e) { showMsg(e.message, false); }
       };
 
+      // ══════════════════════════════════════════
+      //  Категории — добавление
+      // ══════════════════════════════════════════
+      document.getElementById("btn-cat-add").onclick = async () => {
+        const name = document.getElementById("new-cat").value.trim();
+        if (!name) { showMsg("Введите название категории.", false); return; }
+        try {
+          await api("/api/categories", { method: "POST", body: JSON.stringify({ name }) });
+          document.getElementById("new-cat").value = "";
+          showMsg("Категория добавлена.", true);
+          await loadCategories();
+        } catch (e) { showMsg(e.message, false); }
+      };
+
+      // ══════════════════════════════════════════
+      //  Живой поиск
+      // ══════════════════════════════════════════
+      document.getElementById("prod-search").addEventListener("input", () => {
+        clearTimeout(productSearchTimer);
+        const v = document.getElementById("prod-search").value.trim();
+        productSearchTimer = setTimeout(() => {
+          loadProducts(v).catch((e) => showMsg(e.message, false));
+        }, 300);
+      });
+
+      // ══════════════════════════════════════════
+      //  Инициализация
+      // ══════════════════════════════════════════
       (async () => {
         try {
           const { role } = await api("/api/auth/me");
@@ -227,7 +750,8 @@
           }
           document.getElementById("gate").classList.add("hidden");
           document.getElementById("app").classList.remove("hidden");
-          await loadProducts();
+          await loadCategories();
+          await loadProducts("");
           await loadMovements();
         } catch {
           document.getElementById("gate").classList.remove("hidden");

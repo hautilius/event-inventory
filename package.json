@@ -11,9 +11,11 @@
     "node": ">=18"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
+    "@supabase/supabase-js": "^2.105.3",
     "cookie-parser": "^1.4.7",
-    "express": "^4.21.2",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "multer": "^2.1.1",
     "qrcode": "^1.5.4"
   }
 }

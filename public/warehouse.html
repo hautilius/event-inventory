@@ -12,6 +12,130 @@
     />
     <link rel="stylesheet" href="/styles.css" />
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+      /* ── Поиск с фото ── */
+      .search-hint {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .search-hint-photo {
+        width: 48px;
+        height: 48px;
+        flex-shrink: 0;
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--surface, #2a2a3a);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .search-hint-photo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .search-hint-photo.empty {
+        color: var(--muted);
+        font-size: 1.2rem;
+      }
+      .search-hint-text {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+      }
+
+      /* ── Фото в карточке товара ── */
+      #p-photos {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0.75rem 0 1rem;
+      }
+      #p-photos img {
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: opacity .15s;
+      }
+      #p-photos img:hover { opacity: .85; }
+
+      /* ── Lightbox ── */
+      #lightbox {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        background: rgba(0,0,0,.92);
+        align-items: center;
+        justify-content: center;
+      }
+      #lightbox.open { display: flex; }
+      #lightbox img {
+        max-width: 92vw;
+        max-height: 88vh;
+        object-fit: contain;
+        border-radius: 8px;
+        user-select: none;
+        pointer-events: none;
+        transition: opacity .18s;
+      }
+      .lb-close {
+        position: absolute;
+        top: 1rem; right: 1.2rem;
+        font-size: 2rem;
+        color: #fff;
+        background: none;
+        border: none;
+        cursor: pointer;
+        opacity: .8;
+        line-height: 1;
+      }
+      .lb-close:hover { opacity: 1; }
+      .lb-arrow {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 2.4rem;
+        color: #fff;
+        background: none;
+        border: none;
+        cursor: pointer;
+        opacity: .7;
+        padding: 0.5rem;
+        line-height: 1;
+      }
+      .lb-arrow:hover { opacity: 1; }
+      .lb-prev { left: 0.5rem; }
+      .lb-next { right: 0.5rem; }
+      .lb-counter {
+        position: absolute;
+        top: 1rem; left: 50%;
+        transform: translateX(-50%);
+        color: rgba(255,255,255,.7);
+        font-size: 0.85rem;
+      }
+      .lb-dots {
+        position: absolute;
+        bottom: 1.2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 6px;
+      }
+      .lb-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: rgba(255,255,255,.4);
+        border: none;
+        cursor: pointer;
+        transition: background .15s;
+      }
+      .lb-dot.active { background: #fff; }
+    </style>
   </head>
   <body>
     <header class="topbar">
@@ -33,6 +157,7 @@
       <div id="app">
         <div class="tabs">
           <button type="button" class="tab active" data-tab="scan">Сканер QR</button>
+          <button type="button" class="tab" data-tab="search">Поиск</button>
           <button type="button" class="tab" data-tab="manual">По ID</button>
         </div>
 
@@ -45,6 +170,18 @@
             <div id="qr-reader"></div>
             <button type="button" class="btn btn-ghost" id="btn-cam">Запустить камеру</button>
             <button type="button" class="btn btn-ghost hidden" id="btn-stop">Остановить</button>
+          </div>
+        </div>
+
+        <div id="tab-search" class="hidden">
+          <div class="card">
+            <h2>Живой поиск</h2>
+            <p style="color: var(--muted); margin-top: 0; font-size: 0.9rem">
+              По названию, артикулу или категории. Выберите строку — откроется карточка для приёма и отгрузки.
+            </p>
+            <label for="live-search">Запрос</label>
+            <input id="live-search" type="search" autocomplete="off" placeholder="Начните вводить…" />
+            <div id="search-results" class="search-hints hidden" style="margin-top: 0.75rem"></div>
           </div>
         </div>
 
@@ -63,7 +200,11 @@
 
         <div id="product-card" class="card hidden">
           <h2 id="p-name"></h2>
-          <p id="p-meta" style="color: var(--muted); margin: 0.25rem 0 1rem"></p>
+          <p id="p-meta" style="color: var(--muted); margin: 0.25rem 0 0.5rem"></p>
+
+          <!-- Фото товара -->
+          <div id="p-photos"></div>
+
           <p>
             На складе: <strong id="p-qty"></strong> <span id="p-unit"></span>
           </p>
@@ -85,14 +226,90 @@
       </div>
     </main>
 
+    <!-- Лайтбокс -->
+    <div id="lightbox">
+      <button class="lb-close" id="lb-close">×</button>
+      <button class="lb-arrow lb-prev" id="lb-prev">‹</button>
+      <img id="lb-img" src="" alt="Фото" />
+      <button class="lb-arrow lb-next" id="lb-next">›</button>
+      <div class="lb-counter" id="lb-counter"></div>
+      <div class="lb-dots" id="lb-dots"></div>
+    </div>
+
     <script>
       const msgEl = document.getElementById("msg");
       let scanner = null;
       let currentId = null;
+      let searchTimer = null;
 
+      // ══════════════════════════════════════════
+      //  Лайтбокс
+      // ══════════════════════════════════════════
+      const lb = {
+        el: document.getElementById("lightbox"),
+        img: document.getElementById("lb-img"),
+        counter: document.getElementById("lb-counter"),
+        dots: document.getElementById("lb-dots"),
+        urls: [], idx: 0, touchStartX: 0,
+
+        open(urls, idx) {
+          this.urls = urls; this.idx = idx || 0;
+          this.render();
+          this.el.classList.add("open");
+          document.body.style.overflow = "hidden";
+        },
+        close() {
+          this.el.classList.remove("open");
+          document.body.style.overflow = "";
+        },
+        go(d) {
+          this.idx = (this.idx + d + this.urls.length) % this.urls.length;
+          this.render();
+        },
+        render() {
+          this.img.style.opacity = "0";
+          const src = this.urls[this.idx];
+          setTimeout(() => { this.img.src = src; this.img.style.opacity = "1"; }, 80);
+          const n = this.urls.length;
+          this.counter.textContent = n > 1 ? (this.idx + 1) + " / " + n : "";
+          this.dots.innerHTML = n > 1
+            ? this.urls.map((_, i) =>
+                '<button class="lb-dot ' + (i === this.idx ? "active" : "") + '" data-i="' + i + '"></button>'
+              ).join("") : "";
+          this.dots.querySelectorAll(".lb-dot").forEach((b) => {
+            b.onclick = () => { this.idx = +b.dataset.i; this.render(); };
+          });
+          document.getElementById("lb-prev").style.display = n > 1 ? "" : "none";
+          document.getElementById("lb-next").style.display = n > 1 ? "" : "none";
+        }
+      };
+
+      document.getElementById("lb-close").onclick = () => lb.close();
+      document.getElementById("lb-prev").onclick   = () => lb.go(-1);
+      document.getElementById("lb-next").onclick   = () => lb.go(1);
+      lb.el.addEventListener("click", (e) => { if (e.target === lb.el) lb.close(); });
+
+      lb.el.addEventListener("touchstart", (e) => {
+        lb.touchStartX = e.touches[0].clientX;
+      }, { passive: true });
+      lb.el.addEventListener("touchend", (e) => {
+        const dx = e.changedTouches[0].clientX - lb.touchStartX;
+        if (Math.abs(dx) > 40) lb.go(dx < 0 ? 1 : -1);
+      }, { passive: true });
+
+      document.addEventListener("keydown", (e) => {
+        if (!lb.el.classList.contains("open")) return;
+        if (e.key === "ArrowLeft")  lb.go(-1);
+        if (e.key === "ArrowRight") lb.go(1);
+        if (e.key === "Escape")     lb.close();
+      });
+
+      // ══════════════════════════════════════════
+      //  API
+      // ══════════════════════════════════════════
       function showMsg(text, ok) {
         msgEl.innerHTML = text
-          ? `<div class="msg ${ok ? "msg-ok" : "msg-error"}">${text}</div>`
+          ? '<div class="msg ' + (ok ? "msg-ok" : "msg-error") + '">' + text + "</div>"
           : "";
       }
 
@@ -103,51 +320,121 @@
           ...opt,
         });
         const data = await r.json().catch(() => ({}));
-        if (r.status === 401) {
-          window.location.href = "/";
-          throw new Error("Сессия истекла");
-        }
+        if (r.status === 401) { window.location.href = "/"; throw new Error("Сессия истекла"); }
         if (!r.ok) throw new Error(data.error || r.statusText);
         return data;
       }
 
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      }
+
       function parseQr(text) {
         const t = String(text).trim();
-        try {
-          const o = JSON.parse(t);
-          if (o && o.id) return o.id;
-        } catch (_) {}
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(t))
-          return t;
+        try { const o = JSON.parse(t); if (o && o.id) return o.id; } catch (_) {}
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(t)) return t;
         return null;
       }
 
+      // ══════════════════════════════════════════
+      //  Загрузка товара
+      // ══════════════════════════════════════════
       async function loadProduct(id) {
-        if (!id) {
-          showMsg("Не удалось прочитать QR. Ожидается JSON с полем id или UUID.", false);
-          return;
-        }
+        if (!id) { showMsg("Не удалось прочитать QR. Ожидается JSON с полем id или UUID.", false); return; }
         currentId = id;
         showMsg("");
         try {
           const p = await api("/api/products/" + encodeURIComponent(id));
-          document.getElementById("product-card").classList.remove("hidden");
           document.getElementById("p-name").textContent = p.name;
           document.getElementById("p-meta").textContent = [p.sku, p.category].filter(Boolean).join(" · ");
-          document.getElementById("p-qty").textContent = p.quantity;
+          document.getElementById("p-qty").textContent  = p.quantity;
           document.getElementById("p-unit").textContent = p.unit || "шт";
+
+          // Фото
+          const photos  = Array.isArray(p.photos) ? p.photos : [];
+          const photosWrap = document.getElementById("p-photos");
+          if (photos.length) {
+            const photosJson = escapeHtml(JSON.stringify(photos));
+            photosWrap.innerHTML = photos.map((u, i) =>
+              '<img src="' + escapeHtml(u) + '" alt="Фото" data-photos=\'' + photosJson + '\' data-idx="' + i + '" />'
+            ).join("");
+            photosWrap.querySelectorAll("img[data-photos]").forEach((img) => {
+              img.onclick = () => {
+                try { lb.open(JSON.parse(img.getAttribute("data-photos")), parseInt(img.dataset.idx || "0", 10)); }
+                catch {}
+              };
+            });
+          } else {
+            photosWrap.innerHTML = "";
+          }
+
+          document.getElementById("product-card").classList.remove("hidden");
+          // Прокрутить к карточке
+          document.getElementById("product-card").scrollIntoView({ behavior: "smooth", block: "start" });
         } catch (e) {
           document.getElementById("product-card").classList.add("hidden");
           showMsg(e.message, false);
         }
       }
 
+      // ══════════════════════════════════════════
+      //  Поиск с фото
+      // ══════════════════════════════════════════
+      async function runProductSearch(q) {
+        const box     = document.getElementById("search-results");
+        const trimmed = (q || "").trim();
+        if (!trimmed) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+        try {
+          const list = await api("/api/products?q=" + encodeURIComponent(trimmed));
+          if (!list.length) {
+            box.innerHTML = '<div class="search-hint" style="cursor:default;color:var(--muted)">Ничего не найдено</div>';
+            box.classList.remove("hidden");
+            return;
+          }
+          box.innerHTML = list.map((p) => {
+            const photos     = Array.isArray(p.photos) ? p.photos : [];
+            const firstPhoto = photos[0] || "";
+            const photoHtml  = firstPhoto
+              ? '<div class="search-hint-photo"><img src="' + escapeHtml(firstPhoto) + '" alt="" /></div>'
+              : '<div class="search-hint-photo empty">📦</div>';
+            return (
+              '<button type="button" class="search-hint" data-pid="' + escapeHtml(p.id) + '">' +
+              photoHtml +
+              '<div class="search-hint-text">' +
+              '<span>' + escapeHtml(p.name) + "</span>" +
+              "<small>" + escapeHtml([p.sku, p.category].filter(Boolean).join(" · ") || "—") +
+              " · остаток: " + p.quantity + " " + escapeHtml(p.unit || "шт") + "</small>" +
+              "</div></button>"
+            );
+          }).join("");
+
+          box.querySelectorAll("[data-pid]").forEach((b) => {
+            b.onclick = () => {
+              loadProduct(b.getAttribute("data-pid"));
+              showMsg("Товар выбран. Ниже — приём и отгрузка.", true);
+            };
+          });
+          box.classList.remove("hidden");
+        } catch (e) { showMsg(e.message, false); }
+      }
+
+      document.getElementById("live-search").addEventListener("input", (e) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => runProductSearch(e.target.value), 320);
+      });
+
+      // ══════════════════════════════════════════
+      //  Табы
+      // ══════════════════════════════════════════
       document.querySelectorAll(".tab").forEach((btn) => {
         btn.addEventListener("click", () => {
           document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
           btn.classList.add("active");
           const t = btn.dataset.tab;
-          document.getElementById("tab-scan").classList.toggle("hidden", t !== "scan");
+          document.getElementById("tab-scan").classList.toggle("hidden",   t !== "scan");
+          document.getElementById("tab-search").classList.toggle("hidden", t !== "search");
           document.getElementById("tab-manual").classList.toggle("hidden", t !== "manual");
         });
       });
@@ -155,10 +442,13 @@
       document.getElementById("btn-load").onclick = () =>
         loadProduct(document.getElementById("manual-id").value.trim());
 
+      // ══════════════════════════════════════════
+      //  Приём / Отгрузка
+      // ══════════════════════════════════════════
       async function stock(kind) {
         if (!currentId) return;
         const amount = Math.max(1, parseInt(document.getElementById("amt").value, 10) || 1);
-        const note = document.getElementById("note").value.trim();
+        const note   = document.getElementById("note").value.trim();
         showMsg("");
         try {
           const path = kind === "receive" ? "/api/stock/receive" : "/api/stock/ship";
@@ -168,20 +458,17 @@
           });
           document.getElementById("p-qty").textContent = product.quantity;
           showMsg(kind === "receive" ? "Приём выполнен." : "Отгрузка выполнена.", true);
-        } catch (e) {
-          showMsg(e.message, false);
-        }
+        } catch (e) { showMsg(e.message, false); }
       }
       document.getElementById("btn-receive").onclick = () => stock("receive");
-      document.getElementById("btn-ship").onclick = () => stock("ship");
+      document.getElementById("btn-ship").onclick    = () => stock("ship");
 
+      // ══════════════════════════════════════════
+      //  Сканер QR
+      // ══════════════════════════════════════════
       document.getElementById("btn-cam").onclick = async () => {
-        if (!window.Html5Qrcode) {
-          showMsg("Библиотека сканера не загрузилась. Проверьте сеть.", false);
-          return;
-        }
-        const region = "qr-reader";
-        scanner = new Html5Qrcode(region);
+        if (!window.Html5Qrcode) { showMsg("Библиотека сканера не загрузилась. Проверьте сеть.", false); return; }
+        scanner = new Html5Qrcode("qr-reader");
         document.getElementById("btn-cam").classList.add("hidden");
         document.getElementById("btn-stop").classList.remove("hidden");
         showMsg("");
@@ -193,15 +480,11 @@
               const id = parseQr(decoded);
               if (id) {
                 loadProduct(id);
-                scanner
-                  .stop()
-                  .then(() => {
-                    scanner.clear();
-                    scanner = null;
-                    document.getElementById("btn-cam").classList.remove("hidden");
-                    document.getElementById("btn-stop").classList.add("hidden");
-                  })
-                  .catch(() => {});
+                scanner.stop().then(() => {
+                  scanner.clear(); scanner = null;
+                  document.getElementById("btn-cam").classList.remove("hidden");
+                  document.getElementById("btn-stop").classList.add("hidden");
+                }).catch(() => {});
               }
             },
             () => {}
@@ -210,26 +493,24 @@
           document.getElementById("btn-cam").classList.remove("hidden");
           document.getElementById("btn-stop").classList.add("hidden");
           showMsg(
-            "Камера недоступна: " +
-              (e.message || e) +
-              ". Используйте вкладку «По ID» или откройте сайт по localhost/https.",
-            false
+            "Камера недоступна: " + (e.message || e) +
+            ". Используйте вкладку «По ID» или откройте сайт по localhost/https.", false
           );
         }
       };
 
       document.getElementById("btn-stop").onclick = async () => {
         if (scanner) {
-          try {
-            await scanner.stop();
-            scanner.clear();
-          } catch (_) {}
+          try { await scanner.stop(); scanner.clear(); } catch (_) {}
           scanner = null;
         }
         document.getElementById("btn-cam").classList.remove("hidden");
         document.getElementById("btn-stop").classList.add("hidden");
       };
 
+      // ══════════════════════════════════════════
+      //  Инициализация
+      // ══════════════════════════════════════════
       (async () => {
         try {
           const { role } = await api("/api/auth/me");

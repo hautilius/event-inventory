@@ -15,7 +15,7 @@
   <body>
     <header class="topbar">
       <div class="brand">
-        <strong>event.kg</strong>
+        <strong>Event.kg</strong>
         <span>inventory</span>
       </div>
       <div id="nav-actions"></div>
@@ -24,19 +24,27 @@
     <main class="container">
       <section class="hero">
         <h1>Склад и инвентаризация</h1>
-        <p>Вход для склада и администратора. Сканируйте QR на товаре для приёма и отгрузки.</p>
+        <p>
+          Завсклад: приём и отгрузка по QR. Администратор: товары,категории, фото и журнал.
+        </p>
       </section>
 
       <div id="msg"></div>
 
       <div id="panel-login" class="card grid grid-2">
         <div>
-          <h2>Склад</h2>
+          <h2>Завсклад</h2>
           <p style="color: var(--muted); margin-top: 0; font-size: 0.9rem">
             Приём и отгрузка по QR-коду.
           </p>
-          <label for="pw-staff">Пароль склада</label>
-          <input id="pw-staff" type="password" autocomplete="current-password" />
+          <label for="pw-staff">Пароль завсклада</label>
+          <div style="position:relative;">
+            <input id="pw-staff" type="password" autocomplete="current-password"
+              style="padding-right:2.75rem;width:100%;box-sizing:border-box;" />
+            <button type="button" data-toggle="pw-staff"
+              style="position:absolute;right:0.65rem;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:1.1rem;padding:0;line-height:1;"
+              aria-label="Показать пароль">👁</button>
+          </div>
           <div style="margin-top: 1rem">
             <button type="button" class="btn btn-primary" id="btn-staff">Войти</button>
           </div>
@@ -47,7 +55,13 @@
             Товары, остатки, удаление, журнал движений.
           </p>
           <label for="pw-admin">Пароль администратора</label>
-          <input id="pw-admin" type="password" autocomplete="current-password" />
+          <div style="position:relative;">
+            <input id="pw-admin" type="password" autocomplete="current-password"
+              style="padding-right:2.75rem;width:100%;box-sizing:border-box;" />
+            <button type="button" data-toggle="pw-admin"
+              style="position:absolute;right:0.65rem;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:1.1rem;padding:0;line-height:1;"
+              aria-label="Показать пароль">👁</button>
+          </div>
           <div style="margin-top: 1rem">
             <button type="button" class="btn btn-primary" id="btn-admin">Войти</button>
           </div>
@@ -151,6 +165,23 @@
       document.getElementById("btn-admin").onclick = () =>
         login(document.getElementById("pw-admin").value, true);
       document.getElementById("btn-logout").onclick = logout;
+
+      // Enter в полях пароля
+      document.getElementById("pw-staff").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") document.getElementById("btn-staff").click();
+      });
+      document.getElementById("pw-admin").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") document.getElementById("btn-admin").click();
+      });
+
+      // Глазок — показать / скрыть пароль
+      document.querySelectorAll("[data-toggle]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const inp = document.getElementById(btn.dataset.toggle);
+          inp.type = inp.type === "password" ? "text" : "password";
+          btn.textContent = inp.type === "password" ? "👁" : "🙈";
+        });
+      });
 
       refresh();
     </script>
