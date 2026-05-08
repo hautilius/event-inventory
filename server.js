@@ -84,6 +84,7 @@ function parseSession(cookieVal) {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
+app.set("trust proxy", 1);
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static(UPLOADS_DIR, { fallthrough: false }));
 
@@ -129,8 +130,8 @@ app.post("/api/auth/login", (req, res) => {
     });
     res.cookie(COOKIE_NAME, token, {
   httpOnly: true,
-  sameSite: "lax",
-  secure: process.env.NODE_ENV === "production" || !!process.env.RAILWAY_ENVIRONMENT,
+  sameSite: "none",
+  secure: true,
   maxAge: SESSION_MAX_AGE_MS,
 });
     return res.json({ ok: true, role: "admin" });
