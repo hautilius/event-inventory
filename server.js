@@ -510,6 +510,17 @@ app.get("/api/movements", authAdmin, async (_req, res) => {
   }
 });
 
+// Очистка журнала
+app.delete("/api/movements", authAdmin, async (_req, res) => {
+  try {
+    const { error } = await supabase.from("stock_movements").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Ошибка БД" });
+  }
+});
+
 app.get("/api/products/:id/qr.svg", authStaff, async (req, res) => {
   try {
     const { data: p, error } = await supabase.from("products").select("id").eq("id", req.params.id).maybeSingle();
